@@ -1,0 +1,512 @@
+---
+title: "WGCNA"
+author: "David"
+date: "2026-04-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+library('WGCNA')
+library(readr)
+Dineen_rlog_counts <- read_csv("Dineen_rlog_counts.csv")
+Dineen_rlog_counts_t <- Dineen_rlog_counts %>% column_to_rownames('wbid') %>% t() %>% as.data.frame()
+rownames(Dineen_rlog_counts_t) <- gsub("sorted_", "", rownames(Dineen_rlog_counts_t))
+Dineen_rlog_counts_t[1:10,1:10]
+
+# remove least variant
+# Calculate variance for each gene
+gene_vars <- apply(Dineen_rlog_transposed, 2, var)
+
+# Remove genes with variance below threshold .1
+var_threshold <- .1
+Dineen_filtered <- Dineen_rlog_counts_t[, gene_vars > var_threshold]
+dim(Dineen_filtered)
+# Check how many genes removed
+ncol(Dineen_rlog_counts_t) - ncol(Dineen_filtered)
+
+```
+
+```{r WGCNA filtering}
+allowWGCNAThreads()
+
+# Check for genes and samples with too many missing values or zero variance
+gsg <- goodSamplesGenes(Dineen_filtered, verbose = 3)
+gsg$allOK  # Should return TRUE
+```
+
+```{r power threshold for scale-free}
+# Calculate soft-thresholding powers
+powers <- c(1:10, seq(12, 20, by = 2))
+sft <- pickSoftThreshold(Dineen_filtered, powerVector = powers, verbose = 5)
+sft
+```
+```{r power threshold for unsigned}
+sft_unsigned <- pickSoftThreshold(Dineen_filtered,
+                                    networkType = "unsigned",
+                                    powerVector = powers,
+                                    verbose = 5)
+sft_unsigned
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r }
+# Set the soft power
+softPower <- 12
+
+# Calculate adjacency matrix
+adjacency <- adjacency(Dineen_filtered, power = softPower, type = "signed")
+
+# Check dimensions
+dim(adjacency)  # Should be 5967 x 5967 (gene x gene)
+
+# Transform adjacency into Topological Overlap Matrix (TOM)
+TOM <- TOMsimilarity(adjacency, TOMType = "signed")
+
+# Calculate dissimilarity for clustering
+dissTOM <- 1 - TOM
+
+# Check progress
+cat("Adjacency and TOM calculated\n")
+
+# Cluster genes using TOM-based dissimilarity
+geneTree <- hclust(as.dist(dissTOM), method = "average")
+
+# Plot the dendrogram
+plot(geneTree, xlab = "", sub = "",
+     main = "Gene clustering on TOM-based dissimilarity",
+     labels = FALSE, hang = 0.04)
+
+```
+
+```{r module detection}
+# Set minimum module size
+  minModuleSize <- 30  # Genes per module minimum
+
+  # Module identification using dynamic tree cut
+  dynamicMods <- cutreeDynamic(dendro = geneTree,
+                               distM = dissTOM,
+                               deepSplit = 2,  # Sensitivity: 0-4, higher = more/smaller modules
+                               pamRespectsDendro = FALSE,
+                               minClusterSize = minModuleSize)
+
+  # Check how many modules were found
+  table(dynamicMods)
+
+  # Convert numeric labels to colors (WGCNA convention)
+  dynamicColors <- labels2colors(dynamicMods)
+  table(dynamicColors)
+
+  # Plot the dendrogram with module colors
+  plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
+                     dendroLabels = FALSE, hang = 0.03,
+                     addGuide = TRUE, guideHang = 0.05,
+                     main = "Gene dendrogram and module colors")
+```
+```{r Step 6: Calculate Module Eigengenes and Merge Similar Modules}
+# Calculate eigengenes (1st principal component of each module)
+  MEList <- moduleEigengenes(Dineen_filtered, colors = dynamicColors)
+  MEs <- MEList$eigengenes
+
+  # Calculate dissimilarity of module eigengenes
+  MEDiss <- 1 - cor(MEs)
+
+  # Cluster module eigengenes
+  METree <- hclust(as.dist(MEDiss), method = "average")
+
+  # Plot the dendrogram of modules
+  plot(METree, main = "Clustering of module eigengenes",
+       xlab = "", sub = "")
+
+  # Set a height cutoff for merging (0.25 = modules with >75% correlation get merged)
+  MEDissThres <- 0.25
+  abline(h = MEDissThres, col = "red")
+```
+
+```{r }
+# Call the merge function
+  merge <- mergeCloseModules(Dineen_filtered,
+                            dynamicColors,
+                            cutHeight = MEDissThres,
+                            verbose = 3)
+
+  # The merged module colors
+  mergedColors <- merge$colors
+  table(mergedColors)
+
+  # Eigengenes of the merged modules
+  mergedMEs <- merge$newMEs
+
+  # Compare before and after merging
+  plotDendroAndColors(geneTree,
+                     cbind(dynamicColors, mergedColors),
+                     c("Dynamic Tree Cut", "Merged dynamic"),
+                     dendroLabels = FALSE, hang = 0.03,
+                     addGuide = TRUE, guideHang = 0.05,
+                     main = "Gene dendrogram: before and after merging")
+```
+
+
+```{r predict genotypes}
+
+  # Create trait data frame
+  # Rows must match samples in Dineen_filtered exactly
+  sample_names <- rownames(Dineen_filtered)
+
+  traits <- data.frame(
+    row.names = sample_names,
+    # Binary traits for each genotype
+    WT = as.numeric(grepl("^wt_", sample_names)),
+    elt2d = as.numeric(grepl("^elt2d_", sample_names) & !grepl("elt2delt7d", sample_names)),
+    elt7d = as.numeric(grepl("^elt7d_", sample_names)),
+    double = as.numeric(grepl("elt2delt7d", sample_names))
+  )
+
+  # Check it looks correct
+  traits
+  
+  nGenes <- ncol(Dineen_filtered)
+  nSamples <- nrow(Dineen_filtered)
+
+  # Recalculate MEs with merged colors (if not already done)
+  MEs0 <- moduleEigengenes(Dineen_filtered, mergedColors)$eigengenes
+  MEs <- orderMEs(MEs0)  # Order by hierarchical clustering
+
+  # Correlate eigengenes with traits
+  moduleTraitCor <- cor(MEs, traits, use = "p")
+  moduleTraitPvalue <- corPvalueStudent(moduleTraitCor, nSamples)
+
+  # Display correlations
+  moduleTraitCor
+  moduleTraitPvalue
+
+```
+
+```{r heatmap}
+  # Heatmap of module-trait relationships
+  textMatrix <- paste(signif(moduleTraitCor, 2), "\n(",
+                     signif(moduleTraitPvalue, 1), ")", sep = "")
+  dim(textMatrix) <- dim(moduleTraitCor)
+
+  par(mar = c(6, 8.5, 3, 3))
+  labeledHeatmap(Matrix = moduleTraitCor,
+                xLabels = names(traits),
+                yLabels = names(MEs),
+                ySymbols = names(MEs),
+                colorLabels = FALSE,
+                colors = blueWhiteRed(50),
+                textMatrix = textMatrix,
+                setStdMargins = FALSE,
+                cex.text = 0.5,
+                zlim = c(-1, 1),
+                main = paste("Module-trait relationships"))
+```
+
+```{r comparison with DE classes}
+ # Get gene-to-module assignments
+  gene_modules <- data.frame(
+    wbid = colnames(Dineen_filtered),
+    wgcna_module = mergedColors,
+    stringsAsFactors = FALSE
+  )
+
+  # Load DESeq2 buffering analysis
+  buffering <- read.csv("Dineen_DESeq2_buffering_analysis.csv")
+
+  # Merge with WGCNA modules
+  comparison <- buffering %>%
+    select(wbid, buffering_pattern, elt2d_log2FC, double_log2FC, interaction_log2FC) %>%
+    inner_join(gene_modules, by = "wbid")
+
+  # How many genes overlap?
+  nrow(comparison)  # Should be close to 5967
+
+  # Contingency table
+  overlap_table <- table(comparison$wgcna_module, comparison$buffering_pattern)
+  overlap_table
+
+  # As proportions (% of each module in each DESeq2 class)
+  prop.table(overlap_table, margin = 1) * 100  # Row percentages
+
+  
+
+  library(ggplot2)
+
+  # Heatmap of overlap
+  overlap_df <- as.data.frame(overlap_table)
+  colnames(overlap_df) <- c("WGCNA_Module", "DESeq2_Pattern", "Count")
+
+  ggplot(overlap_df, aes(x = DESeq2_Pattern, y = WGCNA_Module, fill = Count)) +
+    geom_tile() +
+    geom_text(aes(label = Count), size = 3) +
+    scale_fill_gradient(low = "white", high = "darkblue") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = "WGCNA Module vs DESeq2 Buffering Pattern Overlap",
+         x = "DESeq2 Buffering Pattern",
+         y = "WGCNA Module")
+```
+```{r plot data}
+# Prepare expression matrix (genes as rows, samples as columns)
+  expr_matrix <- t(Dineen_filtered)
+
+# Scale by row (z-score)
+  expr_scaled <- t(scale(t(expr_matrix)))
+
+  # Make sure comparison dataframe has all genes and is ordered correctly
+  comparison <- comparison[match(rownames(expr_matrix), comparison$wbid), ]
+
+  # Create row annotations for WGCNA modules
+  module_colors <- comparison$wgcna_module
+  names(module_colors) <- comparison$wbid
+
+  # Create row annotations for DESeq2 patterns
+  buffering_colors <- comparison$buffering_pattern
+
+  # Define colors for buffering patterns
+  buffering_palette <- c(
+    "ELT7_buffers_upregulation" = "#E31A1C",
+    "ELT7_buffers_downregulation" = "#1F78B4",
+    "ELT7_compensatory" = "#33A02C",
+    "ELT7_reveals_new_targets" = "#FF7F00",
+    "ELT2_dominant_no_ELT7_effect" = "#999999",
+    "other" = "#FFFFFF"
+  )
+
+  # Create row annotations
+  row_ha_left <- rowAnnotation(
+    WGCNA = module_colors,
+    col = list(WGCNA = setNames(unique(module_colors), unique(module_colors))),
+    annotation_name_side = "top"
+  )
+
+  row_ha_right <- rowAnnotation(
+    DESeq2 = buffering_colors,
+    col = list(DESeq2 = buffering_palette),
+    annotation_name_side = "top"
+  )
+
+  # Create column annotations for genotypes
+  col_ha <- HeatmapAnnotation(
+    Genotype = c(rep("WT", 4), rep("elt7d", 3), rep("elt2d", 4), rep("double", 3)),
+    col = list(Genotype = c("WT" = "#4DAF4A", "elt2d" = "#E41A1C",
+                            "elt7d" = "#377EB8", "double" = "#984EA3"))
+  )
+
+```
+
+```{r heatmap}
+  # Create the heatmap
+  # Scale by row (z-score) to see patterns better
+  ht <- Heatmap(expr_scaled,
+                name = "Expression\n(z-score)",
+
+                # Clustering
+                cluster_rows = TRUE,
+                cluster_columns = FALSE,  # Keep samples in genotype order
+                show_row_dend = TRUE,
+                show_column_dend = FALSE,
+                
+                # Split by WGCNA module
+                row_split = factor(module_colors, levels = unique(module_colors)),
+                row_title_rot = 0,
+                row_gap = unit(2, "mm"),
+
+                # Annotations
+                left_annotation = row_ha_left,
+                right_annotation = row_ha_right,
+                top_annotation = col_ha,
+
+                # Labels
+                show_row_names = FALSE,  # Too many genes to show names
+                show_column_names = TRUE,
+                column_names_gp = gpar(fontsize = 8),
+
+                # Colors
+                col = colorRamp2(c(-2, 0, 2), c("blue", "white", "red")),
+
+                # Size
+                heatmap_legend_param = list(
+                  title = "Expression\n(z-score)",
+                  at = c(-2, 0, 2),
+                  labels = c("-2", "0", "2")
+                )
+  )
+
+  # Draw the heatmap
+  draw(ht, heatmap_legend_side = "right")
+```
+
+```{r heatmap group by DE}
+# Prepare expression matrix (genes as rows, samples as columns)
+  expr_matrix <- t(Dineen_filtered)
+
+  # Scale by row (z-score)
+  expr_scaled <- t(scale(t(expr_matrix)))
+
+  # Make sure comparison dataframe has all genes and is ordered correctly
+  comparison <- comparison[match(rownames(expr_matrix), comparison$wbid), ]
+
+  # Create row annotations for WGCNA modules
+  module_colors <- comparison$wgcna_module
+  names(module_colors) <- comparison$wbid
+
+  # Create row annotations for DESeq2 patterns
+  buffering_colors <- comparison$buffering_pattern
+
+  # Define colors for buffering patterns
+  buffering_palette <- c(
+    "ELT7_buffers_upregulation" = "#E31A1C",
+    "ELT7_buffers_downregulation" = "#1F78B4",
+    "ELT7_compensatory" = "#33A02C",
+    "ELT7_reveals_new_targets" = "#FF7F00",
+    "ELT2_dominant_no_ELT7_effect" = "#999999",
+    "other" = "#FFFFFF"
+  )
+
+  # Create row annotation for WGCNA modules (on left)
+  row_ha_left <- rowAnnotation(
+    WGCNA = module_colors,
+    col = list(WGCNA = setNames(unique(module_colors), unique(module_colors))),
+    annotation_name_side = "top"
+  )
+
+  # Create column annotations for genotypes
+  col_ha <- HeatmapAnnotation(
+    Genotype = c(rep("WT", 4), rep("elt7d", 3), rep("elt2d", 4), rep("double", 3)),
+    col = list(Genotype = c("WT" = "#4DAF4A", "elt2d" = "#E41A1C",
+                            "elt7d" = "#377EB8", "double" = "#984EA3"))
+  )
+
+  # Create the heatmap with row splitting by DESeq2 buffering pattern
+  ht <- Heatmap(expr_scaled,
+                name = "Expression\n(z-score)",
+
+                # Clustering
+                cluster_rows = TRUE,
+                cluster_columns = FALSE,
+                show_row_dend = TRUE,
+                show_column_dend = FALSE,
+
+                # # Split by DESeq2 buffering pattern
+                # row_split = factor(buffering_colors,
+                #                  levels = c("ELT7_buffers_upregulation",
+                #                           "ELT7_buffers_downregulation",
+                #                           "ELT7_compensatory",
+                #                           "ELT7_reveals_new_targets",
+                #                           "ELT2_dominant_no_ELT7_effect",
+                #                           "other")),
+                row_split = 9,
+                row_title_rot = 0,
+                row_gap = unit(2, "mm"),
+
+                # Annotations
+                left_annotation = row_ha_left,
+                top_annotation = col_ha,
+
+                # Labels
+                show_row_names = FALSE,
+                show_column_names = TRUE,
+                column_names_gp = gpar(fontsize = 8),
+
+                # Colors
+                col = colorRamp2(c(-2, 0, 2), c("blue", "white", "red")),
+
+                # Size
+                heatmap_legend_param = list(
+                  title = "Expression\n(z-score)",
+                  at = c(-2, 0, 2),
+                  labels = c("-2", "0", "2")
+                )
+  )
+
+  # Draw the heatmap
+  draw(ht, heatmap_legend_side = "right")
+```
+
+```{r module descriptions}
+ # Get module sizes
+  module_sizes <- table(mergedColors)
+
+  # Create summary table
+  module_summary <- data.frame(
+    Module = rownames(moduleTraitCor),
+    n_genes = as.numeric(module_sizes[gsub("ME", "", rownames(moduleTraitCor))]),
+
+    # Get strongest correlation
+    strongest_cor = apply(abs(moduleTraitCor), 1, max),
+    strongest_trait = colnames(moduleTraitCor)[apply(abs(moduleTraitCor), 1, which.max)],
+
+    # Get the actual correlation value (with sign)
+    cor_value = sapply(1:nrow(moduleTraitCor), function(i) {
+      moduleTraitCor[i, which.max(abs(moduleTraitCor[i,]))]
+    }),
+
+    stringsAsFactors = FALSE
+  )
+
+  # Add short and long descriptions based on patterns
+  module_summary$short_description <- c(
+    "ELT-7Δ specific",           # MEblack: r=0.85 elt7d
+    "WT/intestinal identity",    # MEblue: r=0.74 WT
+    "Double mutant DOWN",        # MEpink: r=-0.97 double
+    "Double mutant UP",          # MEgreen: r=0.99 double
+    "ELT-2Δ DOWN, Double UP",   # MEtan: r=-0.72 elt2d, r=0.80 double
+    "WT high, Double mid",       # MEgrey60: r=-0.85 WT
+    "ELT-2Δ UP, Double mid",    # MEturquoise: r=0.64 elt2d
+    "Unresponsive",              # MElightgreen: weak correlations
+    "ELT-2Δ specific UP"         # MEred: r=0.97 elt2d
+  )
+
+  module_summary$long_description <- c(
+    "Genes specifically upregulated in ELT-7Δ single mutant. May represent ELT-7 repressed targets or compensatory responses.",
+
+    "Genes highly expressed in wild-type, maintained in normal intestinal identity. Reduced in ELT-2Δ mutants, suggesting ELT-2 activated targets.",
+
+    "Genes dramatically downregulated specifically in double mutant (r=-0.97). Represents strong ELT-7 buffering - genes maintained in ELT-2Δ alone but lost when both 
+  TFs deleted.",
+
+    "Genes dramatically upregulated specifically in double mutant (r=0.99). May represent derepression when both ELT-2 and ELT-7 removed, or compensatory stress 
+  responses.",
+
+    "Genes downregulated in ELT-2Δ but upregulated in double mutant. Suggests complex regulatory logic where ELT-7 loss reverses ELT-2Δ effects.",
+
+    "Genes high in WT and moderately high in double mutant. Represents partial compensation or alternative regulatory pathways.",
+
+    "Genes upregulated in ELT-2Δ with moderate correlation in double. May represent indirect responses to ELT-2 loss.",
+
+    "Genes with weak correlations to all genotypes. May be constitutively expressed or respond to technical variation rather than genotype.",
+
+    "Genes strongly and specifically upregulated in ELT-2Δ (r=0.97), but not in double mutant. Classic ELT-2 repressed targets or compensatory upregulation that's 
+  suppressed when ELT-7 also removed."
+  )
+
+  # Reorder by module size (largest first) or by trait association
+  module_summary <- module_summary[order(-module_summary$n_genes), ]
+
+  # Print the table
+  print(module_summary, row.names = FALSE)
+
+  # Save as CSV
+  write.csv(module_summary, "WGCNA_module_annotations.csv", row.names = FALSE)
+
+  # Create a nice formatted table view
+  library(knitr)
+  kable(module_summary[, c("Module", "n_genes", "strongest_trait", "cor_value", "short_description")],
+        col.names = c("Module", "# Genes", "Primary Trait", "Correlation", "Description"),
+        digits = 2)
+```
+
+
