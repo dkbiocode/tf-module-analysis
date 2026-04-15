@@ -1,8 +1,8 @@
 # Network analysis of gene expression data
 
-Weighted Gene Co-expression Network Analysis (WGCNA) is a principled approach for gene cluster identification and inferrence of gene expression modules.
+Weighted Gene Co-expression Network Analysis (WGCNA) is a principled approach for gene cluster identification and inferrence of gene expression modules. This project applies this method to published data (ref) to see if insights can be gained with recent methods. 
 
-## Background
+## Background and Biological System
 
 The embryonic tissue of origin for the *C. elegans* intestine is, like all animals, the endoderm. Unique to *C. elegans*, however, is that the single intestine performs the functions normally taken on by the entire set of organs derived from endoderm in other animals. 
 
@@ -15,9 +15,9 @@ Assymetric paralogues are described elsewhere in literature not only in developm
 These dynamics drive the gene regulatory network underlying tissue, organ, and tumor realization, and must be understood as a fundamental aspect of developmental processes. 
 
 
-## Dineen et al.
+## Original Study
 
-The study Dineen et al. 2018, made perturbations of elt-2 and elt-7 using a rescue cassette to maintain a normal embryonic development. Following deletion of the cassette, the intestines were dissected and subjected to RNA-seq, providing 3-4 replicates across each of single and double mutants and a wild type control. 
+In (Dineen et al. H201), the authors made perturbations of elt-2 and elt-7 using a rescue cassette to maintain a normal embryonic development. Following deletion of the cassette, the intestines were dissected and subjected to RNA-seq, providing 3-4 replicates across each of single and double mutants and a wild type control. 
 
 The focus of this study was to compare gene clusters to ELT-2 binding data available at the time. The authors proposed various gene regulation models as a result. 
 
