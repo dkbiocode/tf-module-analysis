@@ -15,5 +15,12 @@ Assymetric paralogues are described elsewhere in literature not only in developm
 These dynamics drive the gene regulatory network underlying tissue, organ, and tumor realization, and must be understood as a fundamental aspect of developmental processes. 
 
 
-
 ## Dineen et al.
+
+The study Dineen et al. 2018, made perturbations of elt-2 and elt-7 using a rescue cassette to maintain a normal embryonic development. Following deletion of the cassette, the intestines were dissected and subjected to RNA-seq, providing 3-4 replicates across each of single and double mutants and a wild type control. 
+
+The focus of this study was to compare gene clusters to ELT-2 binding data available at the time. The authors proposed various gene regulation models as a result. 
+
+## Reanalysis with WGCNA 
+
+The following project uses a more [recent method]() to define gene expression clusters, applying scale-free network assumptions to infer modular organization and find "hub genes" underlying these modules. 
