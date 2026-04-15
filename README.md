@@ -2,6 +2,8 @@
 
 Weighted Gene Co-expression Network Analysis (WGCNA) is a principled approach for gene cluster identification and inferrence of gene expression modules. This project applies this method to published data (ref) to see if insights can be gained with recent methods. 
 
+[Jump to findings](#findings)
+
 ## Background and Biological System
 
 The embryonic tissue of origin for the *C. elegans* intestine is, like all animals, the endoderm. Unique to *C. elegans*, however, is that the single intestine performs the functions normally taken on by the entire set of organs derived from endoderm in other animals. 
@@ -24,3 +26,12 @@ The focus of this study was to compare gene clusters to ELT-2 binding data avail
 ## Reanalysis with WGCNA 
 
 The following project uses a more [recent method]() to define gene expression clusters, applying scale-free network assumptions to infer modular organization and find "hub genes" underlying these modules. 
+
+### Findings 
+
+#### clear clusters
+
+#### hub genes and transcription factors 
+
+#### contamination by gonadal tissue (or non-cell autonomous effects) 
+
