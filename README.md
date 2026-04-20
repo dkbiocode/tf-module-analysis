@@ -29,6 +29,12 @@ The following project uses a more [recent method]() to define gene expression cl
 
 ### Findings 
 
+#### Modules
+
+![Module dendrogram](fig/WGCNA_dendrogram.png)
+
+![Module to genotype correlations](fig/genotype_module_tab.png)
+
 #### clear clusters
 
 #### hub genes and transcription factors 
